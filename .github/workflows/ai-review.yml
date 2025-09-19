@@ -1,40 +1,28 @@
-name: AI PR Reviewer
+name: AI Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]  # run on new PRs and updates
+    types: [opened, synchronize, reopened]
 
 jobs:
   review:
     runs-on: ubuntu-latest
-
-    permissions:
-      pull-requests: write
-      contents: read
-
     steps:
-      - name: Checkout bot repo
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
-
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests python-dotenv langchain langchain-groq
+        run: |
+          python -m pip install --upgrade pip
+          pip install groq langchain langchain-groq pyyaml httpx
 
-      - name: Run AI Reviewer
+      - name: Run AI review
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: python version_1.py
+        run: |
+          python version_1.py
