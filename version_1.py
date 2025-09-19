@@ -13,7 +13,7 @@ if not api_key:
 llm = ChatGroq(
     temperature=0,
     groq_api_key=api_key,
-    model_name="mixtral-8x7b-32768"
+    model_name="llama2-70b-4096"  # Updated model name
 )
 
 # Prompt for code review
