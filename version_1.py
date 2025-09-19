@@ -1,58 +1,42 @@
 import os
-import requests
-from dotenv import load_dotenv
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+import subprocess
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 
-load_dotenv()
+# Get API key from env
+api_key = os.environ.get("GROQ_API_KEY")
+if not api_key:
+    raise ValueError("❌ GROQ_API_KEY not found in environment variables!")
 
-# 🔑 Load secrets from GitHub Actions
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-repo_full = os.getenv("GITHUB_REPOSITORY")  # e.g., "Yash-Panchal-094/Text-Analyzer"
-owner, repo = repo_full.split("/")
-pr_number = os.getenv("PR_NUMBER")
-
-if not (GITHUB_TOKEN and GROQ_API_KEY and pr_number):
-    raise ValueError("❌ Missing required environment variables")
-
-# --- GitHub API helpers ---
-def fetch_pr_diff(owner, repo, pr_number, token):
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
-    headers = {"Authorization": f"token {token}"}
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    diff_url = response.json()["diff_url"]
-    diff = requests.get(diff_url, headers=headers).text
-    return diff
-
-def post_review_comment(owner, repo, pr_number, token, review_body):
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    headers = {"Authorization": f"token {token}"}
-    payload = {"body": review_body}
-    response = requests.post(url, headers=headers, json=payload)
-    response.raise_for_status()
-    return response.json()
-
-# --- LLM setup ---
+# Setup LLM
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    temperature=0.3,
-    api_key=GROQ_API_KEY
+    temperature=0,
+    groq_api_key=api_key,
+    model_name="mixtral-8x7b-32768"
 )
-parser = StrOutputParser()
 
-review_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a senior engineer reviewing GitHub PRs."),
-    ("human", "Here is the PR diff:\n\n{diff}\n\nWrite a constructive review.")
-])
-review_chain = review_prompt | llm | parser
+# Prompt for code review
+prompt = PromptTemplate(
+    input_variables=["diff"],
+    template="""
+You are an AI code reviewer. Review the following Git diff and provide:
+1. A summary of the changes
+2. Potential bugs or issues
+3. Suggestions for improvement
 
-# --- Run bot ---
-if __name__ == "__main__":
-    diff = fetch_pr_diff(owner, repo, pr_number, GITHUB_TOKEN)
-    review = review_chain.invoke({"diff": diff[:4000]})  # limit diff size if huge
-    comment = post_review_comment(owner, repo, pr_number, GITHUB_TOKEN, review)
-    print(f"✅ Review posted: {comment['html_url']}")
+Diff:
+{diff}
+"""
+)
+
+review_chain = LLMChain(prompt=prompt, llm=llm)
+
+# Get the diff from git
+diff = subprocess.getoutput("git diff HEAD~1 HEAD")
+
+if not diff.strip():
+    print("⚠️ No diff found. Skipping review.")
+else:
+    review = review_chain.invoke({"diff": diff[:4000]})
+    print("🤖 AI Review:\n", review["text"])
