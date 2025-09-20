@@ -1,33 +1,30 @@
-name: AI PR Reviewer
+name: AI Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize]
 
 jobs:
   review:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install google-generativeai PyGithub
+        run: pip install PyGithub requests PyJWT google-genai
 
-      - name: Run AI PR Reviewer
+      - name: Run AI review
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           APP_ID: ${{ secrets.APP_ID }}
           INSTALLATION_ID: ${{ secrets.INSTALLATION_ID }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python version_1.py
