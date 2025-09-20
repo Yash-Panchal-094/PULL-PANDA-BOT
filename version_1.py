@@ -61,10 +61,11 @@ Analyze the following GitHub PR diff and provide constructive feedback:
 
 response = client.models.generate_content(
     model="gemini-1.5-flash",
-    contents=[Content(parts=[Part.from_text(prompt)])],
+    contents=prompt,
 )
 
 review = response.text.strip()
+
 
 # ====== Step 6: Post review as comment ======
 pr.create_issue_comment(f"🤖 **AI Code Review (Gemini):**\n\n{review}")
