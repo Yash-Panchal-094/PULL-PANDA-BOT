@@ -1,42 +1,32 @@
 import os
-import subprocess
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain_groq import ChatGroq
+import google.generativeai as genai
+from github import Github
 
-# Get API key from env
-api_key = os.environ.get("GROQ_API_KEY")
-if not api_key:
-    raise ValueError("❌ GROQ_API_KEY not found in environment variables!")
+# 🔑 Configure Gemini
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+model = genai.GenerativeModel("gemini-1.5-flash")  # or gemini-1.5-pro for better quality
 
-# Setup LLM
-llm = ChatGroq(
-    temperature=0,
-    groq_api_key=api_key,
-    model_name="llama-3.1-70b-versatile"  # Updated model name
-)
+# 🔑 GitHub authentication
+app_id = os.environ["APP_ID"]
+installation_id = os.environ["INSTALLATION_ID"]
+private_key = os.environ["PRIVATE_KEY"]
 
-# Prompt for code review
-prompt = PromptTemplate(
-    input_variables=["diff"],
-    template="""
-You are an AI code reviewer. Review the following Git diff and provide:
-1. A summary of the changes
-2. Potential bugs or issues
-3. Suggestions for improvement
+# Personal Access Token (or GitHub App token if you're signing JWT)
+gh_token = os.environ["GH_TOKEN"]
+g = Github(gh_token)
+repo = g.get_repo(os.environ["GITHUB_REPOSITORY"])
+pr_number = int(os.environ["PR_NUMBER"])
+pr = repo.get_pull(pr_number)
 
-Diff:
-{diff}
-"""
-)
+# Extract PR diff
+diff = pr.diff()
 
-review_chain = LLMChain(prompt=prompt, llm=llm)
+# Ask Gemini for a review
+prompt = f"Review the following GitHub Pull Request diff and provide feedback:\n\n{diff[:4000]}"
+response = model.generate_content(prompt)
 
-# Get the diff from git
-diff = subprocess.getoutput("git diff HEAD~1 HEAD")
+review_text = response.text if response and response.text else "⚠️ No review generated."
 
-if not diff.strip():
-    print("⚠️ No diff found. Skipping review.")
-else:
-    review = review_chain.invoke({"diff": diff[:4000]})
-    print("🤖 AI Review:\n", review["text"])
+# Post comment on PR
+pr.create_issue_comment(review_text)
+print("✅ Review posted successfully.")
