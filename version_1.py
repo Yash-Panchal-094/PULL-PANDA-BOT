@@ -1,40 +1,72 @@
 import os
+import jwt
+import time
 import requests
-from github import Github
+from github import Github, Auth
+from google import genai
+from google.genai.types import Content, Part
 
-# Load secrets from env
-gh_token = os.getenv("GH_TOKEN")
-repo_name = os.getenv("GITHUB_REPOSITORY")
-pr_number = os.getenv("PR_NUMBER")
+# ====== Load secrets ======
+APP_ID = os.environ["APP_ID"]
+INSTALLATION_ID = os.environ["INSTALLATION_ID"]
+PRIVATE_KEY = os.environ["PRIVATE_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-# Authenticate with GitHub
-g = Github(gh_token)
+# ====== Step 1: Create JWT for App authentication ======
+def generate_jwt(app_id, private_key):
+    payload = {
+        "iat": int(time.time()) - 60,
+        "exp": int(time.time()) + (10 * 60),
+        "iss": app_id
+    }
+    return jwt.encode(payload, private_key, algorithm="RS256")
+
+jwt_token = generate_jwt(APP_ID, PRIVATE_KEY)
+
+# ====== Step 2: Exchange JWT for installation access token ======
+url = f"https://api.github.com/app/installations/{INSTALLATION_ID}/access_tokens"
+headers = {"Authorization": f"Bearer {jwt_token}", "Accept": "application/vnd.github+json"}
+response = requests.post(url, headers=headers)
+if response.status_code != 201:
+    raise Exception(f"Failed to get installation token: {response.text}")
+
+installation_token = response.json()["token"]
+
+# ====== Step 3: Authenticate GitHub with installation token ======
+g = Github(auth=Auth.Token(installation_token))
+repo_name = os.environ["GITHUB_REPOSITORY"]
+pr_number = int(os.environ["PR_NUMBER"])
+
 repo = g.get_repo(repo_name)
-pr = repo.get_pull(int(pr_number))
+pr = repo.get_pull(pr_number)
 
-# 🔧 Get diff using GitHub REST API (since PyGithub doesn't provide .diff())
+# ====== Step 4: Get diff of PR ======
 diff_url = pr.url + ".diff"
-headers = {"Authorization": f"token {gh_token}"}
-diff_response = requests.get(diff_url, headers=headers)
+diff_headers = {"Authorization": f"token {installation_token}"}
+diff_response = requests.get(diff_url, headers=diff_headers)
 
-if diff_response.status_code == 200:
-    diff_text = diff_response.text
-else:
-    diff_text = f"⚠️ Failed to fetch diff (status {diff_response.status_code})"
+if diff_response.status_code != 200:
+    raise Exception(f"Failed to fetch diff: {diff_response.text}")
 
-print("Fetched diff successfully!")
+diff = diff_response.text[:4000]  # limit size
 
-# 🧠 Send diff to Gemini API
-import google.generativeai as genai
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# ====== Step 5: Use Gemini for review ======
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-model = genai.GenerativeModel("gemini-1.5-flash")
-prompt = f"Review the following Pull Request diff and provide a concise code review:\n\n{diff_text}"
-response = model.generate_content(prompt)
+prompt = f"""You are a code review assistant.
+Analyze the following GitHub PR diff and provide constructive feedback:
 
-review_comment = response.text
-print("Generated review:\n", review_comment)
+{diff}
+"""
 
-# 💬 Post review as PR comment
-pr.create_issue_comment(review_comment)
+response = client.models.generate_content(
+    model="gemini-1.5-flash",
+    contents=[Content(parts=[Part.from_text(prompt)])],
+)
+
+review = response.text.strip()
+
+# ====== Step 6: Post review as comment ======
+pr.create_issue_comment(f"🤖 **AI Code Review (Gemini):**\n\n{review}")
+
 print("✅ Review posted successfully!")
